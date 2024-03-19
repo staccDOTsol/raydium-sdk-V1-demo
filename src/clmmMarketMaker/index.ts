@@ -1,27 +1,44 @@
+import { BN } from 'bn.js';
+// SOL-USDC pool id 2QdhepnKRTLjjSqPL1PtKNwqrUkoLee5Gqs8bvZhRdMv
+import fs from 'fs';
+import cron from 'node-cron';
+
 import {
   ApiClmmPoolsItem,
   Clmm,
   ReturnTypeFetchMultiplePoolInfos,
-  TokenAccount
-} from '@raydium-io/raydium-sdk'
-import { Connection, Keypair } from '@solana/web3.js'
+  TokenAccount,
+} from '@raydium-io/raydium-sdk';
+import {
+  Connection,
+  Keypair,
+} from '@solana/web3.js';
 
-import cron from 'node-cron'
+import { PROGRAMIDS } from '../../config';
+import { formatClmmKeys } from '../formatClmmKeys';
+import {
+  closePositionTx,
+  createPositionTx,
+} from './clmmTx';
+import {
+  getUserTokenAccounts,
+  TokenAccountInfo,
+} from './tokenAccount';
 
-import bs58 from 'bs58'
-import { PROGRAMIDS } from '../../config'
-import { formatClmmKeys } from '../formatClmmKeys'
-import { getUserTokenAccounts, TokenAccountInfo } from './tokenAccount'
-
-// SOL-USDC pool id 2QdhepnKRTLjjSqPL1PtKNwqrUkoLee5Gqs8bvZhRdMv
-
-const commitment = 'confirmed'
+const commitment = 'finalized'
 const poolId = process.argv[2]
-const createDeviation = !isNaN(Number(process.argv[3])) ? Number(process.argv[3]) : 10
-const closeDeviation = !isNaN(Number(process.argv[4])) ? Number(process.argv[4]) : 5
-const connection = new Connection('rpc node url', commitment)
+const createDeviation = !isNaN(Number(process.argv[3])) ? Number(process.argv[3]) : 1.333
+const closeDeviation = !isNaN(Number(process.argv[4])) ? Number(process.argv[4]) : 0.999
+const connection = new Connection(process.env.RPC as string, commitment)
 
-const owner = Keypair.fromSecretKey(bs58.decode(`your secret key here`))
+const owner = Keypair.fromSecretKey(
+  new Uint8Array(
+    JSON.parse(
+      fs.readFileSync('/home/stacc/7i.json').toString()
+
+    )
+  )
+)
 
 let cachedPools: ApiClmmPoolsItem[] = []
 
@@ -76,10 +93,21 @@ async function checkPosition() {
 
   const res = await getPoolInfo(poolId)
   const parsedPool = res[poolId]
+  const tokenAccounts = accountsRawInfo
+  .map((a) => {
+    if (a.accountInfo.mint.equals(parsedPool.state.mintA.mint) || a.accountInfo.mint.equals(parsedPool.state.mintB.mint)) {
+      return a
+    }
+    return undefined
+  }
+  )
+  .filter((a) => a) as TokenAccount[]
   if (parsedPool) {
     console.log(`\nConcentrated pool: ${poolId}`)
     console.log(`\nclose deviation setting: ${closeDeviation}%, create deviation setting: ${createDeviation}%`)
     const currentPrice = parsedPool.state.currentPrice
+    // randomize parsedPool.positionAccount
+    parsedPool.positionAccount ? parsedPool.positionAccount = parsedPool.positionAccount?.sort(() => Math.random() - 0.5) : null
     parsedPool.positionAccount?.forEach(async (position, idx) => {
       const { priceLower, priceUpper } = position
       console.log(
@@ -94,17 +122,19 @@ async function checkPosition() {
         currentPrice.mul((100 + closeDeviation) / 100),
       ]
 
+
       if (currentPositionMid < closeLow || currentPositionMid > closeUp) {
+        try {
         console.log('\n⛔ close position triggered!')
         console.log(`closeLower:${closeLow}\ncurrentPosition:${currentPositionMid}\ncloseUpper: ${closeUp}`)
         /* close position here */
-        // await closePositionTx({
-        //   connection,
-        //   poolInfo: parsedPool.state,
-        //   position,
-        //   owner,
-        //   tokenAccounts: accountsRawInfo,
-        // });
+        await closePositionTx({
+          connection,
+          poolInfo: parsedPool.state,
+          position,
+          owner,
+          tokenAccounts,
+        });
 
         const [recreateLower, recreateUpper] = [
           currentPrice.mul((100 - createDeviation) / 100),
@@ -112,21 +142,51 @@ async function checkPosition() {
         ]
         console.log('\n ✅ create new position')
         console.log(`priceLower:${recreateLower}\npriceUpper: ${recreateUpper}`)
+        let amountA
+        poolId == "GNmprs1Ferqb5pxJevxmz87nyms54wSEvqwaBPzsxzUz" ? amountA =  new BN(66 *  10 ** 7) : amountA =  new BN(333 *  10 ** 6) 
+        console.log(amountA.toNumber())
+
+
+        console.log(amountA.toNumber())
         /* create position here */
-        // await createPositionTx({
-        //   connection,
-        //   poolInfo: parsedPool.state,
-        //   priceLower,
-        //   priceUpper,
-        //   owner,
-        //   tokenAccounts: accountsRawInfo,
-        //   amountA: new BN(10000),
-        // });
-        return
+        await createPositionTx({
+          connection,
+          poolInfo: parsedPool.state,
+          priceLower: recreateLower,
+          priceUpper: recreateUpper,
+          owner,
+          tokenAccounts,
+          amountA
+        });
+      } catch (err){
+        console.log(err)
       }
+      }
+
       console.log('position in range, no action needed')
     })
   }
+  const currentPrice = parsedPool.state.currentPrice
+      const [recreateLower, recreateUpper] = [
+        currentPrice.mul((100 - createDeviation) / 100),
+        currentPrice.mul((100 + createDeviation) / 100),
+      ]
+      console.log('\n ✅ create new position')
+      console.log(`priceLower:${recreateLower}\npriceUpper: ${recreateUpper}`)
+      let amountA
+      poolId == "GNmprs1Ferqb5pxJevxmz87nyms54wSEvqwaBPzsxzUz" ? amountA =  new BN(66 *  10 ** 7) : amountA =  new BN(333 *  10 ** 6) 
+      console.log(amountA.toNumber())
+      console.log(amountA.toNumber())
+      /* create position here */
+      await createPositionTx({
+        connection,
+        poolInfo: parsedPool.state,
+        priceLower: recreateLower,
+        priceUpper: recreateUpper,
+        owner,
+        tokenAccounts,
+        amountA
+      });
 }
 
 const job = cron.schedule('*/1 * * * *', checkPosition, {

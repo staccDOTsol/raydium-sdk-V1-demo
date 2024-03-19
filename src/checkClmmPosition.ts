@@ -12,7 +12,10 @@ import {
   TickArrayLayout,
   TickUtils,
 } from '@raydium-io/raydium-sdk';
-import { MintLayout } from '@solana/spl-token';
+import {
+  getAssociatedTokenAddressSync,
+  MintLayout,
+} from '@solana/spl-token';
 import {
   Connection,
   PublicKey,
@@ -23,15 +26,111 @@ import {
   PROGRAMIDS,
 } from '../config';
 
+const blessed = require('blessed');
+const contrib = require('blessed-contrib');
+const screen = blessed.screen();
+const grid = new contrib.grid({ rows: 2, cols: 1, screen: screen });
+
+function aggregateDataPoints(data: any) {
+  // Determine the number of points to display (maximum of 10 or actual data length if less)
+  
+  // If the data length is less than or equal to maxPoints, no aggregation is needed
+    return data.map((point:any, index: any) => ({ x: 't' + index, y: point[1] }));
+
+}
+
+const totalAs: any[] = [];
+const totalBs: any[] = [];
+// Aggregate data points
+const aggregatedTotalAs = aggregateDataPoints(totalAs);
+const aggregatedTotalBs = aggregateDataPoints(totalBs);
+
+// Prepare series data
+const series1 = {
+  title: 'Total A',
+  x: aggregatedTotalAs.map((point: any) => point.x),
+  y: aggregatedTotalAs.map((point: any) => point.y),
+  style: { line: 'red' }
+};
+
+const series2 = {
+  title: 'Total B',
+  x: aggregatedTotalBs.map((point: any) => point.x),
+  y: aggregatedTotalBs.map((point: any) => point.y),
+  style: { line: 'blue' }
+};
+
+// Set up the line charts in the grid
+const line1 = grid.set(0, 0, 1, 1, contrib.line, {
+  label: 'Chart for Total A',
+  showLegend: true,
+});
+
+const line2 = grid.set(1, 0, 1, 1, contrib.line, {
+  label: 'Chart for Total B',
+  showLegend: true,
+});
+
+// Set the data for both line charts
+line1.setData([series1]);
+line2.setData([series2]);
+
+// Keybindings to exit
+screen.key(['escape', 'q', 'C-c'], function(ch: any, key: any) {
+  return process.exit(0);
+});
+screen.render();
+
+function updateData() {
+  // Update or fetch new data for totalAs and totalBs
+  // For example, add new data points to totalAs and totalBs
+  // Then update the chart data
+
+  const aggregatedTotalAs = aggregateDataPoints(totalAs);
+  const aggregatedTotalBs = aggregateDataPoints(totalBs);
+  
+  // Prepare series data
+  const series1 = {
+    title: 'Total A',
+    x: aggregatedTotalAs.map((point: any) => point.x),
+    y: aggregatedTotalAs.map((point: any) => point.y),
+    style: { line: 'red' }
+  };
+  
+  const series2 = {
+    title: 'Total B',
+    x: aggregatedTotalBs.map((point: any) => point.x),
+    y: aggregatedTotalBs.map((point: any) => point.y),
+    style: { line: 'blue' }
+  };
+  
+  // Set up the line charts in the grid
+  const line1 = grid.set(0, 0, 1, 1, contrib.line, {
+    label: 'Chart for Total A',
+    showLegend: true,
+  });
+  
+  const line2 = grid.set(1, 0, 1, 1, contrib.line, {
+    label: 'Chart for Total B',
+    showLegend: true,
+  });
+  
+  // Set the data for both line charts
+  line1.setData([series1]);
+  line2.setData([series2]);
+
+  screen.render();
+}
+
+const poolId = new PublicKey(process.argv[2])
 async function checkClmmPosition() {
-  const poolId = new PublicKey("poolId")
+  while (true) {
+  //const poolId = new PublicKey("6HDRX4JhXJSPREqWyqkPWZUSHG2CY7zNxjWu7UxTf1CD")//6HDRX4JhXJSPREqWyqkPWZUSHG2CY7zNxjWu7UxTf1CD 3BVNZ9vzUZ9ohoXbvwZXbmkv76vvbZSBSQjNK38YAFJp
 
   const poolInfoAccount = await connection.getAccountInfo(poolId)
   if (poolInfoAccount === null) throw Error(' pool id error ')
 
   const poolInfo = PoolInfoLayout.decode(poolInfoAccount.data)
-
-  console.log("current activated liquidity:", poolInfo.liquidity.toString());
 
   const gPA = await connection.getProgramAccounts(PROGRAMIDS.CLMM, {
     commitment: "confirmed",
@@ -57,12 +156,14 @@ async function checkClmmPosition() {
     }
   }
 
-  console.log("num of positions:", gPA.length);
   let checkSumLiquidity = new BN(0);
+  let totalA = new Decimal(0)
+  let totalB = new Decimal(0)
   for (const account of gPA) {
     const position = PositionInfoLayout.decode(account.account.data);
 
     const owner = await findNftOwner(position.nftMint);
+    if (owner?.toBase58() != "7ihN8QaTfNoDTRTQGULCzbUT3PHwPDTu5Brcu4iT2paP") continue;
 
     const status = checkPositionStatus(poolInfo, position);
     if (status === "InRange") checkSumLiquidity = checkSumLiquidity.add(position.liquidity);
@@ -124,7 +225,7 @@ async function checkClmmPosition() {
       liquidity: new BN(position.liquidity),
       rewardInfos: position.rewardInfos.map((i: any) => ({ growthInsideLastX64: new BN(i.growthInsideLastX64), rewardAmountOwed: new BN(i.rewardAmountOwed) }))
     }, tickLowerState, tickUpperState)
-
+/*
     console.log(
       "\taddress:", account.pubkey.toBase58(),
       "\towner:", owner?.toBase58() ?? "NOTFOUND",
@@ -137,10 +238,37 @@ async function checkClmmPosition() {
       "\trewardA:", new Decimal(rewardInfos[0].toString()).div(10 ** poolRewardMintDecimals[0]).toString(),
       "\trewardB:", new Decimal(rewardInfos[1].toString()).div(10 ** poolRewardMintDecimals[1]).toString(),
       "\trewardC:", new Decimal(rewardInfos[2].toString()).div(10 ** poolRewardMintDecimals[2]).toString(),
-    );
-  }
+    );*/
+     totalA = totalA.add(amountA).add(pendingFeeA)
+     totalB = totalB.add(amountB).add(pendingFeeB)
+ 
+    
 
-  console.log("check sum:", checkSumLiquidity.eq(poolInfo.liquidity));
+
+  }
+  const owner = new PublicKey("7ihN8QaTfNoDTRTQGULCzbUT3PHwPDTu5Brcu4iT2paP")
+  const associatedAddressA = getAssociatedTokenAddressSync(poolInfo.mintA, owner);
+  const associatedAddressB = getAssociatedTokenAddressSync(poolInfo.mintB, owner);
+
+  const balanceA = new Decimal((await connection.getTokenAccountBalance(associatedAddressA)).value.amount).div(10 ** poolInfo.mintDecimalsA)
+  const balanceB = new Decimal((await connection.getTokenAccountBalance(associatedAddressB)).value.amount).div(10 ** poolInfo.mintDecimalsB)
+  totalA = totalA.add(balanceA)
+  totalB = totalB.add(balanceB)
+  const timestamp = new Date().toISOString()
+  totalAs.push([timestamp,Number(totalA.toString())])
+  totalBs.push([timestamp, Number(totalB.toString())])
+
+  // Set up the interval to update the chart every 2000 milliseconds (2 seconds)
+  setInterval(updateData, 2000);
+  
+  // Keybindings to exit
+  screen.key(['escape', 'q', 'C-c'], function(ch: any, key: any) {
+    return process.exit(0);
+  });
+  
+  // Initial render of the screen
+  screen.render();
+}
 }
 
 function checkPositionStatus(poolInfo: { tickCurrent: number }, position: { tickLower: number, tickUpper: number }) {

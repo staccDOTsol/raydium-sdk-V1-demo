@@ -1,6 +1,8 @@
+import fs from 'fs';
+
 import {
-  ENDPOINT as _ENDPOINT,
   Currency,
+  ENDPOINT as _ENDPOINT,
   LOOKUP_TABLE_CACHE,
   MAINNET_PROGRAM_ID,
   RAYDIUM_MAINNET,
@@ -14,12 +16,19 @@ import {
   PublicKey,
 } from '@solana/web3.js';
 
-export const rpcUrl: string = 'https://xxx.xxx.xxx/'
+export const rpcUrl: string = process.env.RPC as string
 export const rpcToken: string | undefined = undefined
 
-export const wallet = Keypair.fromSecretKey(Buffer.from('<YOUR_WALLET_SECRET_KEY>'))
+const wallet = Keypair.fromSecretKey(
+  new Uint8Array(
+    JSON.parse(
+      fs.readFileSync('/home/stacc/7i.json').toString()
 
-export const connection = new Connection('<YOUR_RPC_URL>');
+    )
+  )
+)
+
+export const connection = new Connection(process.env.RPC as string);
 
 export const PROGRAMIDS = MAINNET_PROGRAM_ID;
 

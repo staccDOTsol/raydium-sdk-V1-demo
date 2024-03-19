@@ -1,15 +1,22 @@
+import BN from 'bn.js';
+import Decimal from 'decimal.js';
+
 import {
   Clmm,
   ClmmPoolInfo,
+  ClmmPoolPersonalPosition,
   fetchMultipleMintInfos,
   TokenAccount,
   TxVersion,
-  ClmmPoolPersonalPosition,
-} from "@raydium-io/raydium-sdk";
-import Decimal from "decimal.js";
-import BN from "bn.js";
-import { Connection, Keypair, Signer } from "@solana/web3.js";
-import { buildAndSendTx } from "./util";
+} from '@raydium-io/raydium-sdk';
+import {
+  Connection,
+  Keypair,
+  Signer,
+} from '@solana/web3.js';
+
+import { PROGRAMIDS } from '../../config';
+import { buildAndSendTx } from './util';
 
 export async function createPositionTx({
   connection,
@@ -44,7 +51,7 @@ export async function createPositionTx({
   const { liquidity, amountSlippageA, amountSlippageB } =
     Clmm.getLiquidityAmountOutFromAmountIn({
       poolInfo,
-      slippage: 0,
+      slippage: 0.666,
       inputA: true,
       tickUpper,
       tickLower,
@@ -59,7 +66,8 @@ export async function createPositionTx({
       }),
       epochInfo: await connection.getEpochInfo(),
     });
-
+    console.log(liquidity.toNumber(), amountSlippageA.amount.toNumber(), amountSlippageB.amount.toNumber())
+const fees = await getPriorityFeeEstimate("High")
   const makeOpenPositionInstruction =
     await Clmm.makeOpenPositionFromLiquidityInstructionSimple({
       connection,
@@ -70,11 +78,13 @@ export async function createPositionTx({
         tokenAccounts,
       },
       tickLower,
+      withMetadata:'no-create',
       tickUpper,
       liquidity,
       makeTxVersion,
       amountMaxA: amountSlippageA.amount,
       amountMaxB: amountSlippageB.amount,
+      computeBudgetConfig: {   microLamports: Math.floor(fees.priorityFeeEstimate)   },
     });
 
   return {
@@ -86,7 +96,32 @@ export async function createPositionTx({
     }),
   };
 }
+const HeliusURL = "https://mainnet.helius-rpc.com/?api-key=baea1964-f797-49e8-8152-6d2292c21241";
 
+async function getPriorityFeeEstimate(priorityLevel: any) {
+  const response = await fetch(HeliusURL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: "1",
+      method: "getPriorityFeeEstimate",
+      params: [
+        {        "accountKeys": [PROGRAMIDS.CLMM.toBase58()],
+          options: { priorityLevel: priorityLevel },
+        },
+      ],
+    }),
+  });
+  const data = await response.json();
+  console.log(
+    "Fee in function for",
+    priorityLevel,
+    " :",
+    data.result.priorityFeeEstimate
+  );
+  return data.result;
+}
 export async function closePositionTx({
   connection,
   poolInfo,
@@ -102,7 +137,8 @@ export async function closePositionTx({
   tokenAccounts: TokenAccount[];
   makeTxVersion?: TxVersion;
 }) {
-  const makeDecreaseLiquidityInstruction =
+  const fees = await getPriorityFeeEstimate("High")
+  const instruction  =
     await Clmm.makeDecreaseLiquidityInstructionSimple({
       connection,
       poolInfo,
@@ -118,6 +154,7 @@ export async function closePositionTx({
       makeTxVersion,
       amountMinA: new BN(0),
       amountMinB: new BN(0),
+      computeBudgetConfig: {   microLamports: Math.floor(fees.priorityFeeEstimate)   },
     });
 
   return {
@@ -126,7 +163,7 @@ export async function closePositionTx({
       makeTxVersion,
       owner,
       innerSimpleV0Transaction:
-        makeDecreaseLiquidityInstruction.innerTransactions,
+        instruction.innerTransactions,
     }),
   };
 }
